@@ -36,7 +36,7 @@ basic_test_() ->
                  timer:sleep(1000),
                  ?assertEqual(1, length(balance_task:get_tasks())),
                  {ok, _} = eredis_pool:q([<<"ZADD">>, <<"$node_alive_heartbeat_test">>, DeadTime, <<"101">>]),
-                 timer:sleep(1500),
+                 timer:sleep(2000),
                  ?assertEqual(2, length(balance_task:get_tasks())),
                  ?assertEqual(ok, balance_task:del_task(<<"test1">>)),
                  ?assertEqual(ok, balance_task:del_task(<<"test2">>))

@@ -139,27 +139,27 @@ do_from(Type, [{Node, NodeTasks} | T], Acc) ->
 do_from(_Type, [], Acc) -> Acc.
 
 %%------------------------------------------------------------------------------
-do_add_task(#state{tasks = Tasks, node = Type} = State, Task) ->
-    case lists:member(Task, Tasks) of
-        false ->
-            case eredis_pool:transaction([["SADD", ?REDIS_ALL_TASK(Type), Task],
+do_add_task(#state{tasks = Tasks, node = Type} = State, AddTasks) ->
+    case AddTasks -- Tasks of
+        [] ->
+            {State, ok};
+        AddTasks1 ->
+            case eredis_pool:transaction([["SADD", ?REDIS_ALL_TASK(Type)] ++ AddTasks1,
                                           ["INCR", ?REDIS_UPDATE_REF(Type)]]) of
-                {ok, _} -> {State#state{tasks = [Task | Tasks]}, ok};
+                {ok, _} -> {State#state{tasks = AddTasks1 ++ Tasks}, ok};
                 {error, Reason} -> {State, {error, Reason}}
-            end;
-        true ->
-            {State, ok}
+            end
     end.
 
-do_del_task(#state{tasks = Tasks, node = Type} = State, Task) ->
-    case lists:member(Task, Tasks) of
-        true ->
-            case eredis_pool:transaction([["SREM", ?REDIS_ALL_TASK(Type), Task],
+do_del_task(#state{tasks = Tasks, node = Type} = State, DelTasks) ->
+    case DelTasks -- (DelTasks -- Tasks) of
+        [] ->
+            {State, ok};
+        DelTasks1 ->
+            case eredis_pool:transaction([["SREM", ?REDIS_ALL_TASK(Type)] ++ DelTasks1,
                                           ["INCR", ?REDIS_UPDATE_REF(Type)]]) of
-                {ok, _} -> {State#state{tasks = lists:delete(Task, Tasks)}, ok};
+                {ok, _} -> {State#state{tasks = Tasks -- DelTasks1}, ok};
                 {error, Reason} -> {State, {error, Reason}}
-            end;
-        false ->
-            {State, ok}
+            end
     end.
 

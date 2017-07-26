@@ -30,6 +30,12 @@
 -define(REDIS_HANDLE_REF(T), iolist_to_binary([<<"$balance_task#handle_ref_">>, T])).
 -define(REDIS_NODE_TASK(T, N), iolist_to_binary([<<"$balance_task#node_task_">>, T, <<"_">>, N])).
 
+-define(CATCH_RUN(X),
+        case catch X of
+            {'EXIT', Re} -> {error, Re};
+            Rl -> Rl
+        end).
+
 -record(state, {node = {},  ref = 0, mod = null, tasks = []}).
 
 %%------------------------------------------------------------------------------
@@ -44,14 +50,16 @@ stop() ->
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-add_task(Task) ->
-    catch gen_server:call(global:whereis_name(global_balance), {add_task, Task}).
+-spec add_task(binary()) -> ok | {error, any()}.
+add_task(Task) when not is_list(Task) -> add_task([Task]);
+add_task(Tasks) -> ?CATCH_RUN(gen_server:call(global:whereis_name(global_balance), {add_task, Tasks})).
 
-del_task(Task) ->
-    catch gen_server:call(global:whereis_name(global_balance), {del_task, Task}).
+-spec del_task(binary()) -> ok | {error, any()}.
+del_task(Task) when not is_list(Task) -> del_task([Task]);
+del_task(Tasks) -> ?CATCH_RUN(gen_server:call(global:whereis_name(global_balance), {del_task, Tasks})).
 
 get_tasks() ->
-    State = sys:get_state(?MODULE), State#state.tasks.
+    ?CATCH_RUN(element(#state.tasks, sys:get_state(?MODULE))).
 
 get_redis_tasks() ->
     {ok, NodeType} = application:get_env(node_alive, node_type),
