@@ -14,7 +14,8 @@
 
 -export([add_task/1,
          del_task/1,
-         syn_task/1]).
+         syn_task/1,
+         where_task/1]).
 
 -export([get_tasks/0,
          get_redis_tasks/0]).
@@ -30,6 +31,8 @@
 
 -define(REDIS_HANDLE_REF(T), iolist_to_binary([<<"$balance_task#handle_ref_">>, T])).
 -define(REDIS_NODE_TASK(T, N), iolist_to_binary([<<"$balance_task#node_task_">>, T, <<"_">>, N])).
+
+-define(ETS, ?MODULE).
 
 -define(CATCH_RUN(X),
         case catch X of
@@ -63,6 +66,13 @@ del_task(Tasks) -> ?CATCH_RUN(gen_server:call(global:whereis_name(global_balance
 syn_task(Tasks) when is_list(Tasks) ->
     ?CATCH_RUN(gen_server:call(global:whereis_name(global_balance), {syn_task, Tasks})).
 
+-spec where_task(binary()) -> undefined | pid().
+where_task(Task) ->
+    case ets:lookup(?ETS, Task) of
+        [] -> undefined;
+        [PID] -> PID
+    end.
+
 get_tasks() ->
     ?CATCH_RUN(element(#state.tasks, sys:get_state(?MODULE))).
 
@@ -77,6 +87,7 @@ init([]) ->
     {ok, Mod} = application:get_env(?MODULE, task_mod),
     {ok, NodeType} = application:get_env(node_alive, node_type),
     {ok, NodeID} = application:get_env(node_alive, node_id),
+    ets:new(?ETS, [named_table, public, {read_concurrency, true}]),
     {ok, #state{node = {to_binary(NodeType), to_binary(NodeID)}, mod = Mod}, 0}.
 
 handle_call(_Call, _From, State) ->
@@ -112,8 +123,8 @@ do_update(#state{ref = Ref, node = {NodeType, NodeID}, tasks = Tasks, mod = Mod}
         {ok, NewRef} when NewRef =/= Ref ->
             case eredis_pool:q([<<"SMEMBERS">>, ?REDIS_NODE_TASK(NodeType, NodeID)]) of
                 {ok, NewTasks} ->
-                    Del = [begin exit(PID, shutdown), {X, PID} end || {X, PID} <- Tasks, not lists:member(X, NewTasks)],
-                    Add = [{X, do_start(Mod, X)} || X <- NewTasks, lists:keyfind(X, 1, Tasks) =:= false],
+                    Del = [do_stop(X, PID) || {X, PID} <- Tasks, not lists:member(X, NewTasks)],
+                    Add = [do_start(Mod, X) || X <- NewTasks, lists:keyfind(X, 1, Tasks) =:= false],
                     State#state{tasks = (Tasks -- Del) ++ Add, ref = NewRef};
                 {error, _} ->
                     State
@@ -122,16 +133,25 @@ do_update(#state{ref = Ref, node = {NodeType, NodeID}, tasks = Tasks, mod = Mod}
             State
     end.
 
+do_stop(Task, PID) ->
+    ets:delete(?ETS, Task),
+    exit(PID, shutdown),
+    {Task, PID}.
+
 do_start(Mod, Task) ->
-    case Mod:start_link(Task) of
-        {ok, PID} -> erlang:monitor(process, PID), PID;
-        _ -> null
+    case catch Mod:start_link(Task) of
+        {ok, PID} ->
+            ets:insert(?ETS, {Task, PID}),
+            erlang:monitor(process, PID),
+            {Task, PID};
+        _ ->
+            {Task, null}
     end.
 
 %%------------------------------------------------------------------------------
 do_reborn(#state{mod = Mod, tasks = List} = State) ->
     State#state{tasks = [case PID of
-                             null -> {X, do_start(Mod, X)};
+                             null -> do_start(Mod, X);
                              _ -> {X, PID}
                          end || {X, PID} <- List]}.
 
