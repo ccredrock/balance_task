@@ -56,11 +56,14 @@ init([]) ->
     ok = do_balance_task(State),
     {ok, State, 0}.
 
-handle_call({add_task, Task}, _From, State) ->
-    {State1, Result} = do_add_task(State, Task),
+handle_call({add_task, Tasks}, _From, State) ->
+    {State1, Result} = do_add_task(State, Tasks),
     {reply, Result, State1};
-handle_call({del_task, Task}, _From, State) ->
-    {State1, Result} = do_del_task(State, Task),
+handle_call({del_task, Tasks}, _From, State) ->
+    {State1, Result} = do_del_task(State, Tasks),
+    {reply, Result, State1};
+handle_call({syn_task, Tasks}, _From, State) ->
+    {State1, Result} = do_syn_task(State, Tasks),
     {reply, Result, State1};
 handle_call(_Call, _From, State) ->
     {reply, ok, State}.
@@ -161,5 +164,14 @@ do_del_task(#state{tasks = Tasks, node = Type} = State, DelTasks) ->
                 {ok, _} -> {State#state{tasks = Tasks -- DelTasks1}, ok};
                 {error, Reason} -> {State, {error, Reason}}
             end
+    end.
+
+do_syn_task(#state{tasks = Tasks} = State, Tasks) -> {State, ok};
+do_syn_task(#state{node = Type} = State, NewTasks) ->
+    case eredis_pool:transaction([["DEL", ?REDIS_ALL_TASK(Type)],
+                                  ["SADD", ?REDIS_ALL_TASK(Type)] ++ NewTasks,
+                                  ["INCR", ?REDIS_UPDATE_REF(Type)]]) of
+        {ok, _} -> {State#state{tasks = NewTasks}, ok};
+        {error, Reason} -> {State, {error, Reason}}
     end.
 

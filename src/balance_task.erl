@@ -13,7 +13,8 @@
 -export([start_link/0]).
 
 -export([add_task/1,
-         del_task/1]).
+         del_task/1,
+         syn_task/1]).
 
 -export([get_tasks/0,
          get_redis_tasks/0]).
@@ -50,13 +51,17 @@ stop() ->
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
--spec add_task(binary()) -> ok | {error, any()}.
+-spec add_task(binary() | [binary()]) -> ok | {error, any()}.
 add_task(Task) when not is_list(Task) -> add_task([Task]);
 add_task(Tasks) -> ?CATCH_RUN(gen_server:call(global:whereis_name(global_balance), {add_task, Tasks})).
 
--spec del_task(binary()) -> ok | {error, any()}.
+-spec del_task(binary() | [binary()]) -> ok | {error, any()}.
 del_task(Task) when not is_list(Task) -> del_task([Task]);
 del_task(Tasks) -> ?CATCH_RUN(gen_server:call(global:whereis_name(global_balance), {del_task, Tasks})).
+
+-spec syn_task([binary()]) -> ok | {error, any()}.
+syn_task(Tasks) when is_list(Tasks) ->
+    ?CATCH_RUN(gen_server:call(global:whereis_name(global_balance), {syn_task, Tasks})).
 
 get_tasks() ->
     ?CATCH_RUN(element(#state.tasks, sys:get_state(?MODULE))).
