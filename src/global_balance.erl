@@ -167,6 +167,12 @@ do_del_task(#state{tasks = Tasks, node = Type} = State, DelTasks) ->
     end.
 
 do_syn_task(#state{tasks = Tasks} = State, Tasks) -> {State, ok};
+do_syn_task(#state{node = Type} = State, []) ->
+    case eredis_pool:transaction([["DEL", ?REDIS_ALL_TASK(Type)],
+                                  ["INCR", ?REDIS_UPDATE_REF(Type)]]) of
+        {ok, _} -> {State#state{tasks = []}, ok};
+        {error, Reason} -> {State, {error, Reason}}
+    end;
 do_syn_task(#state{node = Type} = State, NewTasks) ->
     case eredis_pool:transaction([["DEL", ?REDIS_ALL_TASK(Type)],
                                   ["SADD", ?REDIS_ALL_TASK(Type)] ++ NewTasks,
