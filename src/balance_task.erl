@@ -135,7 +135,7 @@ do_update(#state{ref = Ref, node = {NodeType, NodeID}, tasks = Tasks, mod = Mod}
 
 do_stop(Task, PID) ->
     ets:delete(?ETS, Task),
-    exit(PID, shutdown),
+    Task =/= null andalso exit(PID, shutdown),
     {Task, PID}.
 
 do_start(Mod, Task) ->
