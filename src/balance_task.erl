@@ -70,7 +70,7 @@ syn_task(Tasks) when is_list(Tasks) ->
 where_task(Task) ->
     case ets:lookup(?ETS, Task) of
         [] -> undefined;
-        [PID] -> PID
+        [{_, PID}] -> PID
     end.
 
 get_tasks() ->
