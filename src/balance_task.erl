@@ -154,7 +154,7 @@ do_dead(PID, Reason, #state{tasks = List} = State) ->
         true ->
             case lists:keyfind(PID, 2, List) of
                 false -> State;
-                {Task, PID} -> lists:keystore(PID, 2, List, {Task, null})
+                {Task, PID} -> State#state{tasks = lists:keystore(PID, 2, List, {Task, null})}
             end
     end.
 
