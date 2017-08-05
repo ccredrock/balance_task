@@ -78,8 +78,8 @@ get_tasks() ->
 
 get_redis_tasks() ->
     {ok, Tasks} = eredis_pool:q([<<"SMEMBERS">>,
-                                 ?REDIS_NODE_TASK(node_alive:get_node(type),
-                                                  node_alive:get_node(id))]), Tasks.
+                                 ?REDIS_NODE_TASK(node_alive:node_type(),
+                                                  node_alive:node_id())]), Tasks.
 
 %%------------------------------------------------------------------------------
 init([]) ->
