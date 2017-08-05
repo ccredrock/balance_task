@@ -86,7 +86,7 @@ init([]) ->
     process_flag(trap_exit, true),
     {ok, Mod} = application:get_env(?MODULE, task_mod),
     ets:new(?ETS, [named_table, public, {read_concurrency, true}]),
-    {ok, #state{node = {node_alive:get_node(type), node_alive:get_node(id)}, mod = Mod}, 0}.
+    {ok, #state{node = {node_alive:node_type(), node_alive:node_id()}, mod = Mod}, 0}.
 
 handle_call(_Call, _From, State) ->
     {reply, ok, State}.
