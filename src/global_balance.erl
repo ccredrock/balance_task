@@ -119,7 +119,7 @@ do_balance_task(#state{tasks = Tasks, node = Type}) ->
             List = do_balance(Nodes, Tasks, length(Tasks) div length(Nodes), []),
             List1 = do_from(Type, List, []),
             case eredis_pool:transaction([["INCR", ?REDIS_HANDLE_REF(Type)] | List1]) of
-                {ok, _} -> ok;
+                {ok, DD} -> ok;
                 {error, Reason} -> {error, Reason}
             end;
         _ ->

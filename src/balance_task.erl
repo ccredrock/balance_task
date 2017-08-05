@@ -77,18 +77,16 @@ get_tasks() ->
     ?CATCH_RUN(element(#state.tasks, sys:get_state(?MODULE))).
 
 get_redis_tasks() ->
-    {ok, NodeType} = application:get_env(node_alive, node_type),
-    {ok, NodeID} = application:get_env(node_alive, node_id),
-    {ok, Tasks} = eredis_pool:q([<<"SMEMBERS">>, ?REDIS_NODE_TASK(to_binary(NodeType), to_binary(NodeID))]), Tasks.
+    {ok, Tasks} = eredis_pool:q([<<"SMEMBERS">>,
+                                 ?REDIS_NODE_TASK(node_alive:get_node(type),
+                                                  node_alive:get_node(id))]), Tasks.
 
 %%------------------------------------------------------------------------------
 init([]) ->
     process_flag(trap_exit, true),
     {ok, Mod} = application:get_env(?MODULE, task_mod),
-    {ok, NodeType} = application:get_env(node_alive, node_type),
-    {ok, NodeID} = application:get_env(node_alive, node_id),
     ets:new(?ETS, [named_table, public, {read_concurrency, true}]),
-    {ok, #state{node = {to_binary(NodeType), to_binary(NodeID)}, mod = Mod}, 0}.
+    {ok, #state{node = {node_alive:get_node(type), node_alive:get_node(id)}, mod = Mod}, 0}.
 
 handle_call(_Call, _From, State) ->
     {reply, ok, State}.
@@ -110,12 +108,6 @@ handle_info({'DOWN', _Ref, process, PID, Reason}, State) ->
     {noreply, do_dead(PID, Reason, State)};
 handle_info(_Info, State) ->
     {noreply, State}.
-
-%%------------------------------------------------------------------------------
-to_binary(X) when is_list(X)    -> list_to_binary(X);
-to_binary(X) when is_atom(X)    -> list_to_binary(atom_to_list(X));
-to_binary(X) when is_integer(X) -> integer_to_binary(X);
-to_binary(X) when is_binary(X)  -> X.
 
 %%------------------------------------------------------------------------------
 do_update(#state{ref = Ref, node = {NodeType, NodeID}, tasks = Tasks, mod = Mod} = State) ->
