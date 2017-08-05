@@ -1,12 +1,8 @@
-{application, balance_task,
- [
-  {description, ""},
-  {vsn, "1.0"},
-  {registered, []},
-  {applications, [
-                  kernel,
-                  stdlib
-                 ]},
-  {mod, {balance_task_app, []}},
-  {env, []}
-]}.
+{application,balance_task,
+             [{description,[]},
+              {vsn,"1.0"},
+              {registered,[]},
+              {applications,[kernel,stdlib]},
+              {mod,{balance_task_app,[]}},
+              {env,[]},
+              {modules,[]}]}.
