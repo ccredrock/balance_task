@@ -136,7 +136,8 @@ do_start(Mod, Task) ->
             ets:insert(?ETS, {Task, PID}),
             erlang:monitor(process, PID),
             {Task, PID};
-        _ ->
+        Reason ->
+            error_logger:error_msg("balance_task start fail ~p~n", [{Task, Mod, Reason}]),
             {Task, null}
     end.
 
