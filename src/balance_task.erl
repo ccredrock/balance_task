@@ -29,7 +29,7 @@
 
 -define(TIMEOUT, 500).
 
--define(REDIS_HANDLE_REF(T), iolist_to_binary([<<"$balance_task#handle_ref_">>, T])).
+-define(REDIS_TASK_REF(T),     iolist_to_binary([<<"$balance_task#task_ref_">>, T])).
 -define(REDIS_NODE_TASK(T, N), iolist_to_binary([<<"$balance_task#node_task_">>, T, <<"_">>, N])).
 
 -define(ETS, ?MODULE).
@@ -56,15 +56,15 @@ start_link() ->
 
 -spec add_task(binary() | [binary()]) -> ok | {error, any()}.
 add_task(Task) when not is_list(Task) -> add_task([Task]);
-add_task(Tasks) -> ?CATCH_RUN(gen_server:call(global:whereis_name(global_balance), {add_task, Tasks})).
+add_task(Tasks) -> ?CATCH_RUN(gen_server:call(global:whereis_name(global_balance), {add_task, Tasks}, ?TIMEOUT)).
 
 -spec del_task(binary() | [binary()]) -> ok | {error, any()}.
 del_task(Task) when not is_list(Task) -> del_task([Task]);
-del_task(Tasks) -> ?CATCH_RUN(gen_server:call(global:whereis_name(global_balance), {del_task, Tasks})).
+del_task(Tasks) -> ?CATCH_RUN(gen_server:call(global:whereis_name(global_balance), {del_task, Tasks}, ?TIMEOUT)).
 
 -spec syn_task([binary()]) -> ok | {error, any()}.
 syn_task(Tasks) when is_list(Tasks) ->
-    ?CATCH_RUN(gen_server:call(global:whereis_name(global_balance), {syn_task, Tasks})).
+    ?CATCH_RUN(gen_server:call(global:whereis_name(global_balance), {syn_task, Tasks}, ?TIMEOUT)).
 
 -spec where_task(binary()) -> undefined | pid().
 where_task(Task) ->
@@ -111,7 +111,7 @@ handle_info(_Info, State) ->
 
 %%------------------------------------------------------------------------------
 do_update(#state{ref = Ref, node = {NodeType, NodeID}, tasks = Tasks, mod = Mod} = State) ->
-    case eredis_pool:q([<<"GET">>, ?REDIS_HANDLE_REF(NodeType)]) of
+    case eredis_pool:q([<<"GET">>, ?REDIS_TASK_REF(NodeType)]) of
         {ok, NewRef} when NewRef =/= Ref ->
             case eredis_pool:q([<<"SMEMBERS">>, ?REDIS_NODE_TASK(NodeType, NodeID)]) of
                 {ok, NewTasks} ->
