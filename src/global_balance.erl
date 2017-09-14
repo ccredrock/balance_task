@@ -27,11 +27,13 @@
 -define(REDIS_NODE_TASK(T, N),  iolist_to_binary([<<"$balance_task#node_task_">>, T, <<"_">>, N])).
 -define(REDIS_TASK_REF(T),      iolist_to_binary([<<"$balance_task#task_ref_">>, T])).
 
--define(BALANCE_MODE_AVG, average). %% 平均模式 任务变化全部重新分配
--define(BALANCE_MODE_STD, steady).  %% 平稳模式 删除不会分配 扫射添加
+-define(BALANCE_MODE_AVG, average). %% 平均模式 节点变化重新分配 任务变化全部重新分配
+-define(BALANCE_MODE_STD, steady).  %% 平稳模式 节点变化重新分配 删除不会分配 扫射添加
+-define(BALANCE_MODE_FXD, fixed).   %% 固定模式 节点变化不重新分配 删除不会分配 扫射添加
 
 -record(state, {tasks = [],
-                add_cache = {[], []},
+                cache_tasks = [],
+                cache_nodes = [],
                 way = ?BALANCE_MODE_AVG,
                 need_balance = false,
                 node = null, live_ref = null}).
@@ -162,7 +164,9 @@ do_balance_task(#state{way = Way} = State) ->
         {ok, [_ | _] = Nodes} when Way =:= ?BALANCE_MODE_AVG ->
             do_avg_balance(State, Nodes);
         {ok, [_ | _] = Nodes} when Way =:= ?BALANCE_MODE_STD ->
-            do_add_balance(State, Nodes);
+            do_std_balance(State, Nodes);
+        {ok, [_ | _] = Nodes} when Way =:= ?BALANCE_MODE_FXD ->
+            do_fxd_balance(State, Nodes);
         _ ->
             State
     end.
@@ -193,35 +197,37 @@ do_avg_from(Type, [], Acc) ->
     [[<<"SET">>, ?REDIS_TASK_REF(Type), erlang:system_time()] | Acc].
 
 %%------------------------------------------------------------------------------
-do_add_balance(#state{tasks = Tasks, add_cache = {OldTasks, OldNodes}, node = Type} = State, Nodes) ->
+do_std_balance(#state{tasks = Tasks, node = Type,
+                      cache_tasks = OldTasks, cache_nodes = OldNodes} = State, Nodes) ->
     case lists:sort(OldNodes) =:= lists:sort(Nodes) of
         true ->
-            {ok, _} = do_add_clean(OldTasks -- Tasks, Type, Nodes),
-            {ok, _} = do_add_strafe(Tasks -- OldTasks, Type, Nodes),
-            State#state{add_cache = {Tasks, Nodes}};
+            {ok, _} = do_std_clean(OldTasks -- Tasks, Type, Nodes),
+            {ok, _} = do_std_strafe(Tasks -- OldTasks, Type, Nodes),
+            State#state{cache_tasks = Tasks, cache_nodes = Nodes};
         false ->
             List = do_avg_split(Nodes, Tasks, length(Tasks) div length(Nodes), []),
             List1 = do_avg_from(Type, List, []),
             case eredis_pool:transaction(List1) of
-                {ok, _} -> State#state{add_cache = {Tasks, Nodes}};
+                {ok, _} -> State#state{cache_tasks = Tasks, cache_nodes = Nodes};
                 {error, Reason} -> {error, Reason}
             end
     end.
 
-do_add_clean([], _Type, _Nodes) -> {ok, []};
-do_add_clean(Dels, Type, Nodes) ->
+do_std_clean([], _Type, _Nodes) -> {ok, []};
+do_std_clean(Dels, Type, Nodes) ->
     List = [[<<"SET">>, ?REDIS_TASK_REF(Type), erlang:system_time()]
             | [[<<"SREM">>, ?REDIS_NODE_TASK(Type, Node) | Dels] || Node <- Nodes]],
     eredis_pool:transaction(List).
 
-do_add_strafe([], _Type, _Nodes) -> {ok, []};
-do_add_strafe(Adds, Type, Nodes) ->
-    List = do_add_form(Adds, Type, Nodes),
+do_std_strafe([], _Type, _Nodes) -> {ok, []};
+do_std_strafe(Adds, Type, Nodes) ->
+    List = do_std_form(Adds, Type, Nodes),
     eredis_pool:transaction(List).
 
-do_add_form(Adds, Type, [Node]) ->
-    [<<"SADD">>, ?REDIS_NODE_TASK(Type, Node) | Adds];
-do_add_form(Adds, Type, Nodes) ->
+do_std_form(Adds, Type, [Node]) ->
+    [[<<"SET">>, ?REDIS_TASK_REF(Type), erlang:system_time()],
+     [<<"SADD">>, ?REDIS_NODE_TASK(Type, Node) | Adds]];
+do_std_form(Adds, Type, Nodes) ->
     List = [begin
                 {ok, Cnt} = eredis_pool:q([<<"SCARD">>, ?REDIS_NODE_TASK(Type, X)]),
                 {binary_to_integer(Cnt), X}
@@ -241,4 +247,10 @@ do_fill_form(Adds, Type, [], Min, Tail, Acc) ->
 do_fill_form([Add | AT], Type, [{Cnt, Node} | NT], Min, Tail, Acc) ->
     Acc1 = [[<<"SADD">>, ?REDIS_NODE_TASK(Type, Node), Add] | Acc],
     do_fill_form(AT, Type, [{Cnt + 1, Node} | NT], Min, Tail, Acc1).
+
+%%------------------------------------------------------------------------------
+do_fxd_balance(#state{tasks = Tasks, cache_tasks = OldTasks, node = Type} = State, Nodes) ->
+    {ok, _} = do_std_clean(OldTasks -- Tasks, Type, Nodes),
+    {ok, _} = do_std_strafe(Tasks -- OldTasks, Type, Nodes),
+    State#state{cache_tasks = Tasks, cache_nodes = Nodes}.
 
