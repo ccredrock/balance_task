@@ -10,7 +10,7 @@ basic_test_() ->
      {setup, ?Setup, ?Clearnup,
       [{"redis",
          fun() ->
-                 ?assertEqual(ok, element(1, eredis_pool:q([<<"INFO">>])))
+                 ?assertEqual(ok, element(1, hd(eredis_cluster:qa([<<"INFO">>]))))
          end},
       {"task",
          fun() ->
@@ -31,11 +31,11 @@ basic_test_() ->
                  ?assertEqual(ok, balance_task:add_task(<<"test2">>)),
                  Now = erlang:system_time(seconds),
                  DeadTime = integer_to_binary(Now - 25),
-                 {ok, _} = eredis_pool:transaction([[<<"ZADD">>, <<"$node_alive_heartbeat_test">>, Now, <<"101">>],
-                                                    [<<"INCR">>, <<"$node_alive_ref_test">>]]),
+                 {ok, _} = eredis_cluster:transaction([[<<"ZADD">>, <<"${node_alive}_heartbeat_test">>, Now, <<"101">>],
+                                                       [<<"INCR">>, <<"${node_alive}_ref_test">>]]),
                  timer:sleep(1000),
                  ?assertEqual(1, length(balance_task:get_tasks())),
-                 {ok, _} = eredis_pool:q([<<"ZADD">>, <<"$node_alive_heartbeat_test">>, DeadTime, <<"101">>]),
+                 {ok, _} = eredis_cluster:q([<<"ZADD">>, <<"${node_alive}_heartbeat_test">>, DeadTime, <<"101">>]),
                  timer:sleep(2000),
                  ?assertNotEqual(undefined, balance_task:where_task(<<"test1">>)),
                  ?assertEqual(2, length(balance_task:get_tasks())),
@@ -50,7 +50,7 @@ basic_test_() ->
                  ?assertEqual(ok, balance_task:del_task(<<"test3">>)),
                  ?assertEqual(ok, balance_task:del_task(<<"test4">>)),
                  ?assertEqual(ok, balance_task:del_task(<<"test5">>)),
-                 {ok, _} = eredis_pool:q([<<"DEL">>, <<"$node_alive_heartbeat_test">>])
+                 {ok, _} = eredis_cluster:q([<<"DEL">>, <<"${node_alive}_heartbeat_test">>])
          end}
       ]}
     }.

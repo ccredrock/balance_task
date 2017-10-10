@@ -23,9 +23,9 @@
 
 -define(TIMEOUT, 500).
 
--define(REDIS_ALL_TASK(T),      iolist_to_binary([<<"$balance_task#all_task_">>, T])).
--define(REDIS_NODE_TASK(T, N),  iolist_to_binary([<<"$balance_task#node_task_">>, T, <<"_">>, N])).
--define(REDIS_TASK_REF(T),      iolist_to_binary([<<"$balance_task#task_ref_">>, T])).
+-define(REDIS_ALL_TASK(T),      iolist_to_binary([<<"${balance_task}#all_task_">>, T])).
+-define(REDIS_NODE_TASK(T, N),  iolist_to_binary([<<"${balance_task}#node_task_">>, T, <<"_">>, N])).
+-define(REDIS_TASK_REF(T),      iolist_to_binary([<<"${balance_task}#task_ref_">>, T])).
 
 -define(BALANCE_MODE_AVG, average). %% 平均模式 节点变化重新分配 任务变化全部重新分配
 -define(BALANCE_MODE_STD, steady).  %% 平稳模式 节点变化重新分配 删除不会分配 扫射添加
@@ -50,7 +50,7 @@ get_tasks() ->
 
 get_redis_tasks() ->
     {ok, NodeType} = application:get_env(node_alive, node_type),
-    {ok, Tasks} = eredis_pool:q([<<"SMEMBERS">>, ?REDIS_ALL_TASK(to_binary(NodeType))]), Tasks.
+    {ok, Tasks} = eredis_cluster:q([<<"SMEMBERS">>, ?REDIS_ALL_TASK(to_binary(NodeType))]), Tasks.
 
 to_binary(X) when is_list(X)    -> list_to_binary(X);
 to_binary(X) when is_atom(X)    -> list_to_binary(atom_to_list(X));
@@ -70,17 +70,20 @@ init([]) ->
     {ok, Ref} = node_alive:get_ref(),
     {ok, Type} = application:get_env(node_alive, node_type),
     Way = application:get_env(balance_task, balance_mode, ?BALANCE_MODE_AVG),
-    {ok, Tasks} = eredis_pool:q([<<"SMEMBERS">>, ?REDIS_ALL_TASK(to_binary(Type))]),
+    {ok, Tasks} = eredis_cluster:q([<<"SMEMBERS">>, ?REDIS_ALL_TASK(to_binary(Type))]),
     State = #state{tasks = Tasks, way = Way, node = to_binary(Type), live_ref = Ref},
     {ok, do_balance_task(State), 0}.
 
 handle_call({add_task, Tasks}, _From, State) ->
+    error_logger:info_msg("global_balance add_task ~p~n", [{Tasks, State#state.tasks}]),
     {State1, Result} = do_add_task(State, Tasks),
     {reply, Result, State1};
 handle_call({del_task, Tasks}, _From, State) ->
+    error_logger:info_msg("global_balance del_task ~p~n", [{Tasks, State#state.tasks}]),
     {State1, Result} = do_del_task(State, Tasks),
     {reply, Result, State1};
 handle_call({syn_task, Tasks}, _From, State) ->
+    error_logger:info_msg("global_balance sys_task ~p~n", [{Tasks, State#state.tasks}]),
     {State1, Result} = do_syn_task(State, Tasks),
     {reply, Result, State1};
 handle_call(_Call, _From, State) ->
@@ -110,7 +113,7 @@ do_add_task(#state{tasks = Tasks, node = Type} = State, AddTasks) ->
         [] ->
             {State, ok};
         AddTasks1 ->
-            case eredis_pool:transaction([["SADD", ?REDIS_ALL_TASK(Type)] ++ AddTasks1]) of
+            case eredis_cluster:transaction([["SADD", ?REDIS_ALL_TASK(Type)] ++ AddTasks1]) of
                 {ok, _} -> {State#state{tasks = AddTasks1 ++ Tasks, need_balance = true}, ok};
                 {error, Reason} -> {State, {error, Reason}}
             end
@@ -121,7 +124,7 @@ do_del_task(#state{tasks = Tasks, node = Type} = State, DelTasks) ->
         [] ->
             {State, ok};
         DelTasks1 ->
-            case eredis_pool:transaction([["SREM", ?REDIS_ALL_TASK(Type)] ++ DelTasks1]) of
+            case eredis_cluster:transaction([["SREM", ?REDIS_ALL_TASK(Type)] ++ DelTasks1]) of
                 {ok, _} -> {State#state{tasks = Tasks -- DelTasks1, need_balance = true}, ok};
                 {error, Reason} -> {State, {error, Reason}}
             end
@@ -129,12 +132,12 @@ do_del_task(#state{tasks = Tasks, node = Type} = State, DelTasks) ->
 
 do_syn_task(#state{tasks = Tasks} = State, Tasks) -> {State, ok};
 do_syn_task(#state{node = Type} = State, []) ->
-    case eredis_pool:q(["DEL", ?REDIS_ALL_TASK(Type)]) of
+    case eredis_cluster:q(["DEL", ?REDIS_ALL_TASK(Type)]) of
         {ok, _} -> {State#state{tasks = [], need_balance = true}, ok};
         {error, Reason} -> {State, {error, Reason}}
     end;
 do_syn_task(#state{node = Type} = State, NewTasks) ->
-    case eredis_pool:transaction([["DEL", ?REDIS_ALL_TASK(Type)],
+    case eredis_cluster:transaction([["DEL", ?REDIS_ALL_TASK(Type)],
                                   ["SADD", ?REDIS_ALL_TASK(Type)] ++ NewTasks]) of
         {ok, _} -> {State#state{tasks = NewTasks, need_balance = true}, ok};
         {error, Reason} -> {State, {error, Reason}}
@@ -144,6 +147,7 @@ do_syn_task(#state{node = Type} = State, NewTasks) ->
 do_check_live(#state{live_ref = Ref} = State) ->
     case node_alive:get_ref() of
         {ok, NewRef} when NewRef =/= Ref ->
+            error_logger:info_msg("global_balance find node_alive change ~p~n", [{NewRef, Ref}]),
             State#state{live_ref = NewRef, need_balance = true};
         _ ->
             State
@@ -152,8 +156,11 @@ do_check_live(#state{live_ref = Ref} = State) ->
 do_check_task(#state{need_balance = false} = State) -> State;
 do_check_task(State) ->
     case catch do_balance_task(State) of
-        #state{} = State1 -> State1#state{need_balance = true};
-        Reason -> error_logger:error_msg("balance error ~p~n", [{Reason}]), State
+        #state{} = State1 ->
+            error_logger:info_msg("global_balance balance_task ok ~p~n", [{State}]),
+            State1#state{need_balance = false};
+        Reason ->
+            error_logger:error_msg("balance error ~p~n", [{Reason}]), State
     end.
 
 %%------------------------------------------------------------------------------
@@ -175,7 +182,7 @@ do_balance_task(#state{way = Way} = State) ->
 do_avg_balance(#state{tasks = Tasks, node = Type} = State, Nodes) ->
     List = do_avg_split(Nodes, Tasks, length(Tasks) div length(Nodes), []),
     List1 = do_avg_from(Type, List, []),
-    case eredis_pool:transaction(List1) of
+    case eredis_cluster:transaction(List1) of
         {ok, _} -> State;
         {error, Reason} -> {error, Reason}
     end.
@@ -207,7 +214,7 @@ do_std_balance(#state{tasks = Tasks, node = Type,
         false ->
             List = do_avg_split(Nodes, Tasks, length(Tasks) div length(Nodes), []),
             List1 = do_avg_from(Type, List, []),
-            case eredis_pool:transaction(List1) of
+            case eredis_cluster:transaction(List1) of
                 {ok, _} -> State#state{cache_tasks = Tasks, cache_nodes = Nodes};
                 {error, Reason} -> {error, Reason}
             end
@@ -217,25 +224,25 @@ do_std_clean([], _Type, _Nodes) -> {ok, []};
 do_std_clean(Dels, Type, Nodes) ->
     List = [[<<"SET">>, ?REDIS_TASK_REF(Type), erlang:system_time()]
             | [[<<"SREM">>, ?REDIS_NODE_TASK(Type, Node) | Dels] || Node <- Nodes]],
-    eredis_pool:transaction(List).
+    eredis_cluster:transaction(List).
 
 do_std_strafe([], _Type, _Nodes) -> {ok, []};
 do_std_strafe(Adds, Type, Nodes) ->
     List = do_std_form(Adds, Type, Nodes),
-    eredis_pool:transaction(List).
+    eredis_cluster:transaction(List).
 
 do_std_form(Adds, Type, [Node]) ->
     [[<<"SET">>, ?REDIS_TASK_REF(Type), erlang:system_time()],
      [<<"SADD">>, ?REDIS_NODE_TASK(Type, Node) | Adds]];
 do_std_form(Adds, Type, Nodes) ->
     List = [begin
-                {ok, Cnt} = eredis_pool:q([<<"SCARD">>, ?REDIS_NODE_TASK(Type, X)]),
+                {ok, Cnt} = eredis_cluster:q([<<"SCARD">>, ?REDIS_NODE_TASK(Type, X)]),
                 {binary_to_integer(Cnt), X}
             end || X <- Nodes],
     List1 = [{Min, _} | _] = lists:sort(List),
     do_fill_form(Adds, Type, [], Min, List1, []).
 
-%% 234 -> 334 -> 444 -> 544
+%% [2,3,4] -> [3,3,4] -> [4,4,4] -> [5,4,4]
 do_fill_form([], Type, _Head, _Min, _Tail, Acc) ->
     [[<<"SET">>, ?REDIS_TASK_REF(Type), erlang:system_time()] | Acc];
 do_fill_form(Adds, Type, [{Min, Node} | NT], Min, Tail, Acc) ->

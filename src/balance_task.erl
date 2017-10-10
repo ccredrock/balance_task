@@ -29,8 +29,8 @@
 
 -define(TIMEOUT, 500).
 
--define(REDIS_TASK_REF(T),     iolist_to_binary([<<"$balance_task#task_ref_">>, T])).
--define(REDIS_NODE_TASK(T, N), iolist_to_binary([<<"$balance_task#node_task_">>, T, <<"_">>, N])).
+-define(REDIS_TASK_REF(T),     iolist_to_binary([<<"${balance_task}#task_ref_">>, T])).
+-define(REDIS_NODE_TASK(T, N), iolist_to_binary([<<"${balance_task}#node_task_">>, T, <<"_">>, N])).
 
 -define(ETS, ?MODULE).
 
@@ -77,7 +77,7 @@ get_tasks() ->
     ?CATCH_RUN(element(#state.tasks, sys:get_state(?MODULE))).
 
 get_redis_tasks() ->
-    {ok, Tasks} = eredis_pool:q([<<"SMEMBERS">>,
+    {ok, Tasks} = eredis_cluster:q([<<"SMEMBERS">>,
                                  ?REDIS_NODE_TASK(node_alive:node_type(),
                                                   node_alive:node_id())]), Tasks.
 
@@ -111,9 +111,9 @@ handle_info(_Info, State) ->
 
 %%------------------------------------------------------------------------------
 do_update(#state{ref = Ref, node = {NodeType, NodeID}, tasks = Tasks, mod = Mod} = State) ->
-    case eredis_pool:q([<<"GET">>, ?REDIS_TASK_REF(NodeType)]) of
+    case eredis_cluster:q([<<"GET">>, ?REDIS_TASK_REF(NodeType)]) of
         {ok, NewRef} when NewRef =/= Ref ->
-            case eredis_pool:q([<<"SMEMBERS">>, ?REDIS_NODE_TASK(NodeType, NodeID)]) of
+            case eredis_cluster:q([<<"SMEMBERS">>, ?REDIS_NODE_TASK(NodeType, NodeID)]) of
                 {ok, NewTasks} ->
                     Del = [do_stop(X, PID) || {X, PID} <- Tasks, not lists:member(X, NewTasks)],
                     Add = [do_start(Mod, X) || X <- NewTasks, lists:keyfind(X, 1, Tasks) =:= false],
@@ -126,6 +126,7 @@ do_update(#state{ref = Ref, node = {NodeType, NodeID}, tasks = Tasks, mod = Mod}
     end.
 
 do_stop(Task, PID) ->
+    error_logger:info_msg("balance_task stop process ~p~n", [{Task, PID}]),
     ets:delete(?ETS, Task),
     PID =/= null andalso exit(PID, shutdown),
     {Task, PID}.
@@ -133,6 +134,7 @@ do_stop(Task, PID) ->
 do_start(Mod, Task) ->
     case catch Mod:start_link(Task) of
         {ok, PID} ->
+            error_logger:info_msg("balance_task start process ~p~n", [{Task, Mod, PID}]),
             ets:insert(?ETS, {Task, PID}),
             erlang:monitor(process, PID),
             {Task, PID};
@@ -155,7 +157,9 @@ do_dead(PID, Reason, #state{tasks = List} = State) ->
         true ->
             case lists:keyfind(PID, 2, List) of
                 false -> State;
-                {Task, PID} -> State#state{tasks = lists:keystore(PID, 2, List, {Task, null})}
+                {Task, PID} ->
+                    error_logger:info_msg("balance_task process dead ~p~n", [{Task, PID}]),
+                    State#state{tasks = lists:keystore(PID, 2, List, {Task, null})}
             end
     end.
 

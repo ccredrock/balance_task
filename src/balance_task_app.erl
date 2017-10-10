@@ -15,7 +15,7 @@
 
 %%------------------------------------------------------------------------------
 start(_StartType, _StartArgs) ->
-    application:ensure_started(eredis_pool),
+    application:ensure_started(eredis_cluster),
     application:ensure_started(node_alive),
     application:ensure_started(undead_global),
     global_balance:global_start(),
