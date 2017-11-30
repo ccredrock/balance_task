@@ -111,14 +111,14 @@ handle_info(_Info, State) ->
 
 %%------------------------------------------------------------------------------
 do_update(#state{ref = Ref, node = {NodeType, NodeID}, tasks = Tasks, mod = Mod} = State) ->
-    case eredis_cluster:q([<<"GET">>, ?REDIS_TASK_REF(NodeType)]) of
+    case catch eredis_cluster:q([<<"GET">>, ?REDIS_TASK_REF(NodeType)]) of
         {ok, NewRef} when NewRef =/= Ref ->
-            case eredis_cluster:q([<<"SMEMBERS">>, ?REDIS_NODE_TASK(NodeType, NodeID)]) of
+            case catch eredis_cluster:q([<<"SMEMBERS">>, ?REDIS_NODE_TASK(NodeType, NodeID)]) of
                 {ok, NewTasks} ->
                     Del = [do_stop(X, PID) || {X, PID} <- Tasks, not lists:member(X, NewTasks)],
                     Add = [do_start(Mod, X) || X <- NewTasks, lists:keyfind(X, 1, Tasks) =:= false],
                     State#state{tasks = (Tasks -- Del) ++ Add, ref = NewRef};
-                {error, _} ->
+                _ ->
                     State
             end;
         _ ->

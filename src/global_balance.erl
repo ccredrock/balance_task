@@ -113,9 +113,9 @@ do_add_task(#state{tasks = Tasks, node = Type} = State, AddTasks) ->
         [] ->
             {State, ok};
         AddTasks1 ->
-            case eredis_cluster:transaction([["SADD", ?REDIS_ALL_TASK(Type)] ++ AddTasks1]) of
+            case catch eredis_cluster:transaction([["SADD", ?REDIS_ALL_TASK(Type)] ++ AddTasks1]) of
                 {ok, _} -> {State#state{tasks = AddTasks1 ++ Tasks, need_balance = true}, ok};
-                {error, Reason} -> {State, {error, Reason}}
+                Reason -> {State, {error, Reason}}
             end
     end.
 
@@ -124,23 +124,23 @@ do_del_task(#state{tasks = Tasks, node = Type} = State, DelTasks) ->
         [] ->
             {State, ok};
         DelTasks1 ->
-            case eredis_cluster:transaction([["SREM", ?REDIS_ALL_TASK(Type)] ++ DelTasks1]) of
+            case catch eredis_cluster:transaction([["SREM", ?REDIS_ALL_TASK(Type)] ++ DelTasks1]) of
                 {ok, _} -> {State#state{tasks = Tasks -- DelTasks1, need_balance = true}, ok};
-                {error, Reason} -> {State, {error, Reason}}
+                Reason -> {State, {error, Reason}}
             end
     end.
 
 do_syn_task(#state{tasks = Tasks} = State, Tasks) -> {State, ok};
 do_syn_task(#state{node = Type} = State, []) ->
-    case eredis_cluster:q(["DEL", ?REDIS_ALL_TASK(Type)]) of
+    case catch eredis_cluster:q(["DEL", ?REDIS_ALL_TASK(Type)]) of
         {ok, _} -> {State#state{tasks = [], need_balance = true}, ok};
-        {error, Reason} -> {State, {error, Reason}}
+        Reason -> {State, {error, Reason}}
     end;
 do_syn_task(#state{node = Type} = State, NewTasks) ->
-    case eredis_cluster:transaction([["DEL", ?REDIS_ALL_TASK(Type)],
+    case catch eredis_cluster:transaction([["DEL", ?REDIS_ALL_TASK(Type)],
                                   ["SADD", ?REDIS_ALL_TASK(Type)] ++ NewTasks]) of
         {ok, _} -> {State#state{tasks = NewTasks, need_balance = true}, ok};
-        {error, Reason} -> {State, {error, Reason}}
+        Reason -> {State, {error, Reason}}
     end.
 
 %%------------------------------------------------------------------------------
