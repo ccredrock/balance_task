@@ -157,7 +157,7 @@ do_check_task(#state{need_balance = false} = State) -> State;
 do_check_task(State) ->
     case catch do_balance_task(State) of
         #state{} = State1 ->
-            error_logger:info_msg("global_balance balance_task ok ~p~n", [{State}]),
+            error_logger:info_msg("global_balance balance_task ok ~p~n", [{State1}]),
             State1#state{need_balance = false};
         Reason ->
             error_logger:error_msg("balance error ~p~n", [{Reason}]), State

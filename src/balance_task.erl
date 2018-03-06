@@ -8,9 +8,8 @@
 %%%-------------------------------------------------------------------
 -module(balance_task).
 
--export([start/0, stop/0]).
+-export([start/0]).
 
--export([start_link/0]).
 
 -export([add_task/1,
          del_task/1,
@@ -18,11 +17,12 @@
          where_task/1]).
 
 -export([get_tasks/0,
+         get_alive_tasks/0,
          get_redis_tasks/0]).
 
 %% callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-         code_change/3]).
+-export([start_link/0]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 %%------------------------------------------------------------------------------
 -behaviour(gen_server).
@@ -31,8 +31,6 @@
 
 -define(REDIS_TASK_REF(T),     iolist_to_binary([<<"${balance_task}#task_ref_">>, T])).
 -define(REDIS_NODE_TASK(T, N), iolist_to_binary([<<"${balance_task}#node_task_">>, T, <<"_">>, N])).
-
--define(ETS, ?MODULE).
 
 -define(CATCH_RUN(X),
         case catch X of
@@ -44,10 +42,7 @@
 
 %%------------------------------------------------------------------------------
 start() ->
-    application:start(?MODULE).
-
-stop() ->
-    application:stop(?MODULE).
+    application:ensure_all_started(?MODULE).
 
 %%------------------------------------------------------------------------------
 -spec start_link() -> {ok, pid()} | ignore | {error, any()}.
@@ -68,13 +63,16 @@ syn_task(Tasks) when is_list(Tasks) ->
 
 -spec where_task(binary()) -> undefined | pid().
 where_task(Task) ->
-    case ets:lookup(?ETS, Task) of
+    case ets:lookup(?MODULE, Task) of
         [] -> undefined;
         [{_, PID}] -> PID
     end.
 
 get_tasks() ->
     ?CATCH_RUN(element(#state.tasks, sys:get_state(?MODULE))).
+
+get_alive_tasks() ->
+    ets:tab2list(?MODULE).
 
 get_redis_tasks() ->
     {ok, Tasks} = eredis_cluster:q([<<"SMEMBERS">>,
@@ -85,7 +83,7 @@ get_redis_tasks() ->
 init([]) ->
     process_flag(trap_exit, true),
     {ok, Mod} = application:get_env(?MODULE, task_mod),
-    ets:new(?ETS, [named_table, public, {read_concurrency, true}]),
+    ets:new(?MODULE, [named_table, public, {read_concurrency, true}]),
     {ok, #state{node = {node_alive:node_type(), node_alive:node_id()}, mod = Mod}, 0}.
 
 handle_call(_Call, _From, State) ->
@@ -127,7 +125,7 @@ do_update(#state{ref = Ref, node = {NodeType, NodeID}, tasks = Tasks, mod = Mod}
 
 do_stop(Task, PID) ->
     error_logger:info_msg("balance_task stop process ~p~n", [{Task, PID}]),
-    ets:delete(?ETS, Task),
+    ets:delete(?MODULE, Task),
     PID =/= null andalso exit(PID, shutdown),
     {Task, PID}.
 
@@ -135,7 +133,7 @@ do_start(Mod, Task) ->
     case catch Mod:start_link(Task) of
         {ok, PID} ->
             error_logger:info_msg("balance_task start process ~p~n", [{Task, Mod, PID}]),
-            ets:insert(?ETS, {Task, PID}),
+            ets:insert(?MODULE, {Task, PID}),
             erlang:monitor(process, PID),
             {Task, PID};
         Reason ->

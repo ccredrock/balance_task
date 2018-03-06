@@ -1,9 +1,11 @@
-{application,
- balance_task,
- [{description,[]},
-  {vsn,"2.1"},
-  {registered,[]},
-  {applications,[kernel,stdlib]},
-  {mod,{balance_task_app,[]}},
-  {env,[]},
-  {modules,[]}]}.
+%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-
+%% ex: ts=4 sw=4 ft=erlang et
+{application, balance_task,
+ [{description, "balance_task"},
+  {vsn, "3.0"},
+  {registered, []},
+  {applications, [kernel, stdlib, eredis_cluster, node_alive, undead_global]},
+  {env, []},
+  {mod, {balance_task_app, []}}
+ ]}.
+

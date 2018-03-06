@@ -1,0 +1,12 @@
+*.swp
+*.d
+*.beam
+*.app
+*.dump
+.git
+.eunit
+.erlang.mk
+deps
+log
+tags
+_rel
